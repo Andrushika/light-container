@@ -12,7 +12,7 @@ OBJECTS    += $(BUILD_DIR)/log.o
 LIB_LOG_SRC := $(LIB_LOG)/log.c
 LIB_LOG_FLAGS := -DLOG_USE_COLOR
 
-EXECUTABLE := app
+EXECUTABLE := light-container
 
 INCLUDES := -I$(LIB_LOG)
 
