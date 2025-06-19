@@ -1,3 +1,6 @@
+#ifndef CONTAINER_H
+#define CONTAINER_H
+
 #include <sys/types.h>
 #include <signal.h>
 #include <sched.h>
@@ -13,3 +16,4 @@ typedef struct {
 } container_config;
 
 int container_init(container_config *config, char *stack);
+#endif
