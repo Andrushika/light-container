@@ -13,7 +13,10 @@ typedef struct {
   char *hostname;
   char *cmd;
   char *mount_dir;
+  int socket_fd;
 } container_config;
 
 int container_init(container_config *config, char *stack);
+
+int container_wait(int container_pid);
 #endif

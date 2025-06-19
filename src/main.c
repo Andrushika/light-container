@@ -1,12 +1,17 @@
 #include <stdio.h>
+#include <sys/socket.h>
 #include "log.h"
 #include "argtable3.h"
 #include "container.h"
+#include "userns.h"
+#include <fcntl.h>
 
 int main(int argc, char *argv[]) {
     int exit_code = 0;
     int container_pid = 0;
     container_config config;
+    int sockets[2] = {0};
+
 
     char *stack = NULL;
 
@@ -38,7 +43,21 @@ int main(int argc, char *argv[]) {
         exit_code = -1;
         goto exit;
     }
+
+    log_info("initializing socket pair...");
+    if (socketpair(AF_LOCAL, SOCK_SEQPACKET, 0, sockets)) {
+        log_error("Failed to create socket pair: %m");
+        exit_code = -1;
+        goto exit;
+    }
+
+    if(fcntl(sockets[0], F_SETFD, FD_CLOEXEC) < 0) {
+        log_error("Failed to set close-on-exec flag on socket: %m");
+        exit_code = -1;
+        goto exit;
+    }
     
+    config.socket_fd = sockets[1];
     config.uid = uid_opt->ival[0];
     config.mount_dir = mount_opt->sval[0];
     config.cmd = cmd_opt->sval[0];
@@ -52,10 +71,21 @@ int main(int argc, char *argv[]) {
     }
 
     if((container_pid = container_init(&config, stack + CONTAINER_STACK_SIZE)) <= 0){
-        log_error("Failed to initialize container");
         exit_code = -1;
         goto exit;
     }
+    
+    if(write_id_map_with_helper(container_pid, sockets[0]) < 0) {
+        exit_code = -1;
+        goto exit;
+    }
+
+    if(container_wait(container_pid) < 0) {
+        exit_code = -1;
+        goto exit;
+    }
+    
+    log_debug("Container initialized with PID %d", container_pid);
 
 exit:
     arg_freetable(argtable, sizeof(argtable)/sizeof(argtable[0]));
