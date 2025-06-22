@@ -44,13 +44,6 @@ int container_start(void *arg) {
         return -1;
     }
 
-    // if (config->cmd) {
-    //     char *exec_args[] = {"/bin/sh", "-c", (char*)config->cmd, NULL};
-    //     execve("/bin/sh", exec_args, NULL);
-    //     log_error("failed to execvp: %m");
-    //     return -1;
-    // }
-
     if(config->argv && config->argv[0]) {
         execvp(config->argv[0], config->argv);
         log_error("Failed to execvp command '%s': %m", config->argv[0]);
