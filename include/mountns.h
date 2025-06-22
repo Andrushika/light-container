@@ -4,6 +4,6 @@
 #include <sys/syscall.h> 
 
 #define pivot_root(newroot, oldroot) syscall(SYS_pivot_root, newroot, oldroot)
-int mount_dir_into_container(const char *mount_dir);
+int mount_dir_into_container(const char *mount_dir, char *tmp_dir);
 
 #endif

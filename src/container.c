@@ -21,7 +21,7 @@ int container_start(void *arg) {
     }
 
     log_debug("Mounting directory '%s' into container...", config->mount_dir);
-    if (mount_dir_into_container(config->mount_dir) < 0) {
+    if (mount_dir_into_container(config->mount_dir, config->mount_tmp_dir) < 0) {
         log_error("Failed to mount directory into container: %m");
         return -1;
     }
@@ -44,10 +44,16 @@ int container_start(void *arg) {
         return -1;
     }
 
-    if (config->cmd) {
-        char *exec_args[] = {"/bin/sh", "-c", (char*)config->cmd, NULL};
-        execve("/bin/sh", exec_args, NULL);
-        log_error("failed to execvp: %m");
+    // if (config->cmd) {
+    //     char *exec_args[] = {"/bin/sh", "-c", (char*)config->cmd, NULL};
+    //     execve("/bin/sh", exec_args, NULL);
+    //     log_error("failed to execvp: %m");
+    //     return -1;
+    // }
+
+    if(config->argv && config->argv[0]) {
+        execvp(config->argv[0], config->argv);
+        log_error("Failed to execvp command '%s': %m", config->argv[0]);
         return -1;
     }
     log_error("No command provided to execute in the container");

@@ -6,6 +6,7 @@
 #include "userns.h"
 #include <fcntl.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 int main(int argc, char *argv[]) {
     int exit_code = 0;
@@ -18,7 +19,7 @@ int main(int argc, char *argv[]) {
     struct arg_lit *help = arg_lit0(NULL, "help", "display this help and exit");
     struct arg_int *uid_opt = arg_int1("u", "uid", "<uid>", "set the user ID in the container");
     struct arg_str *mount_opt = arg_str1("m", "mount", "<dir>", "set the mount directory");
-    struct arg_str *cmd_opt = arg_str1("c", "cmd", "<command>", "set the command to run in the container");
+    struct arg_str *cmd_opt = arg_strn(NULL, NULL, "<cmd>...", 1, 10000, "command and its arguments");
     struct arg_end *end = arg_end(20);
 
     void *argtable[] = {
@@ -44,6 +45,15 @@ int main(int argc, char *argv[]) {
         goto exit;
     }
 
+    if (cmd_opt->count < 1) {
+        log_error("No command provided to run in the container.");
+        arg_print_syntax(stderr, argtable, "\n");
+        exit_code = -1;
+        goto exit;
+    }
+    cmd_opt->sval[cmd_opt->count] = NULL;
+
+
     if (socketpair(AF_LOCAL, SOCK_SEQPACKET, 0, sockets)) {
         log_error("Failed to create socket pair: %m");
         exit_code = -1;
@@ -55,12 +65,19 @@ int main(int argc, char *argv[]) {
         exit_code = -1;
         goto exit;
     }
+
+    char tmpdir[] = "/tmp/light-container-mnt.XXXXXX";
+    if (!mkdtemp(tmpdir)){
+        log_error("Failed to create temporary directory for mount: %m");
+        return -1;
+    }
     
     config.hostname = "light-container";
     config.socket_fd = sockets[1];
     config.uid = uid_opt->ival[0];
     config.mount_dir = mount_opt->sval[0];
-    config.cmd = cmd_opt->sval[0];
+    config.argv = cmd_opt->sval;
+    config.mount_tmp_dir = tmpdir;
 
     stack = malloc(CONTAINER_STACK_SIZE);
 
@@ -92,6 +109,9 @@ exit:
     if (stack) {
         free(stack);
     }
+    rmdir(tmpdir);
+    close(sockets[0]);
+    close(sockets[1]);
     log_debug("Exiting with code %d", exit_code);
     return exit_code;
 }

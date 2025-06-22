@@ -7,9 +7,10 @@
 typedef struct {
   uid_t uid;
   char *hostname;
-  char *cmd;
+  char **argv; 
   char *mount_dir;
   int socket_fd;
+  char *mount_tmp_dir;
 } container_config;
 
 int container_init(container_config *config, char *stack);
