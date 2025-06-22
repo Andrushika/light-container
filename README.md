@@ -4,7 +4,7 @@ light-container is a simplified rootless linux container runtime.
 ## Execute
 ```
 make
-./light-container -u 20 -m ~/rootfs-alpine -- /bin/ash -c "ls / && echo hello"
+./light-container -u 0 -m ~/rootfs-alpine -- /bin/ash -c "echo hello light-container!"
 ```
 Please note that the UID is limited from 0 to 65535, and the command to execute in the container should be pass after `--`.
 
