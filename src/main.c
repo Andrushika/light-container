@@ -13,7 +13,6 @@ int main(int argc, char *argv[]) {
     container_config config;
     int sockets[2] = {0};
 
-
     char *stack = NULL;
 
     struct arg_lit *help = arg_lit0(NULL, "help", "display this help and exit");

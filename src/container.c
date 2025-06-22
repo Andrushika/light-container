@@ -3,6 +3,7 @@
 #include "log.h"
 #include "userns.h"
 #include "secure.h"
+#include "mountns.h"
 
 #include <signal.h>
 #include <sched.h>
@@ -16,6 +17,12 @@ int container_start(void *arg) {
     log_debug("Setting hostname to %s", config->hostname);
     if (sethostname(config->hostname, strlen(config->hostname)) < 0) {
         log_error("Failed to set hostname: %m");
+        return -1;
+    }
+
+    log_debug("Mounting directory '%s' into container...", config->mount_dir);
+    if (mount_dir_into_container(config->mount_dir) < 0) {
+        log_error("Failed to mount directory into container: %m");
         return -1;
     }
 
