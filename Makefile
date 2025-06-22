@@ -25,7 +25,7 @@ INCLUDES := -I$(SRC_DIR) -I$(LIB_LOG) -I$(LIB_ARGTABLE) -I$(INCLUDES_DIR)
 all: $(EXECUTABLE)
 
 $(EXECUTABLE): $(OBJECTS)
-	$(CC) $(CFLAGS) -o $@ $^ -lm
+	$(CC) $(CFLAGS) -o $@ $^ -lm -lcap -lseccomp
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(BUILD_DIR)

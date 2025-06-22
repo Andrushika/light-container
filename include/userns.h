@@ -1,11 +1,5 @@
 #ifndef USERNS_H
 #define USERNS_H
-#include <sys/types.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <sys/wait.h>
-#include <grp.h>
 
 #define HOST_MAP_ID_START "100000"
 #define USERNS_MAP_ID_START "0"

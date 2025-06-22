@@ -5,6 +5,7 @@
 #include "container.h"
 #include "userns.h"
 #include <fcntl.h>
+#include <stdlib.h>
 
 int main(int argc, char *argv[]) {
     int exit_code = 0;
@@ -44,7 +45,6 @@ int main(int argc, char *argv[]) {
         goto exit;
     }
 
-    log_info("initializing socket pair...");
     if (socketpair(AF_LOCAL, SOCK_SEQPACKET, 0, sockets)) {
         log_error("Failed to create socket pair: %m");
         exit_code = -1;
@@ -57,6 +57,7 @@ int main(int argc, char *argv[]) {
         goto exit;
     }
     
+    config.hostname = "light-container";
     config.socket_fd = sockets[1];
     config.uid = uid_opt->ival[0];
     config.mount_dir = mount_opt->sval[0];

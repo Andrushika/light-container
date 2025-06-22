@@ -3,6 +3,14 @@
 #include "log.h"
 #include "container.h"
 
+#include <sys/types.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <grp.h>
+
+
 int write_id_map_with_helper(int container_pid, int socket_fd) {
     const char *helper[] = {
         "newuidmap",

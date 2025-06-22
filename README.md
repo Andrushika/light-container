@@ -17,3 +17,18 @@ These tools (`newuidmap` and `newgidmap`) help us do that. They are small progra
     ```
     $ sudo apt install uidmap
     ```
+
+* `libcap`
+This library is use for setting the capabilitiies.
+
+    * Debian / Ubuntu
+    ```
+    sudo apt-get install libcap-dev
+    ```
+
+* `libseccomp`
+Use for limiting the system call by seccomp.
+    * Debian / Ubuntu
+    ```
+    sudo apt-get install libseccomp-dev
+    ```
