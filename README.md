@@ -1,5 +1,5 @@
 # light-container
-light-container is a simplified rootless linux container runtime.
+light-container is a simplified rootless Linux container runtime.
 
 ## Execute
 ```
