@@ -100,16 +100,16 @@ int main(int argc, char *argv[]) {
 
     log_debug("Setting up cgroups for container...");
     if (setup_cgroups(config.hostname, container_pid) < 0) {
-        log_error("Failed to setup cgroups: %m");
-        return -1;
+        log_warn("Cgroups is not enabled; resource limits will be skipped");
     }
+
+    log_debug("Container initialized with PID %d", container_pid);
 
     if(container_wait(container_pid) < 0) {
         exit_code = -1;
         goto exit;
     }
     
-    log_debug("Container initialized with PID %d", container_pid);
 
 exit:
     arg_freetable(argtable, sizeof(argtable)/sizeof(argtable[0]));

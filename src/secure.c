@@ -180,7 +180,6 @@ int prepare_syscall_limitations() {
         return -1;
     }
 
-    log_debug("releasing seccomp context...");
     seccomp_release(ctx);
     log_info("Syscall limitations prepared successfully");
     return 0;

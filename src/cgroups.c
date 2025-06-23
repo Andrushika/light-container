@@ -28,7 +28,7 @@ int setup_cgroups(const char *container_name, int pid) {
              "%s/%s-%d", cgroup_path, container_name, pid);
     
     if (mkdir(container_cgroup, 0755) < 0) {
-        log_error("Failed to create container cgroup: %m");
+        log_warn("Could not create cgroup directory %s: %m", container_cgroup);
         return -1;
     }
     
@@ -71,7 +71,7 @@ const char* get_saved_cgroup_path() {
 void cleanup_cgroups() {
     char *cgroup_path = get_saved_cgroup_path();
     if (!cgroup_path || !cgroup_path[0]) {
-        log_warn("No cgroup path saved, nothing to clean up");
+        log_debug("No cgroup path saved, nothing to clean up");
         return;
     }
     
