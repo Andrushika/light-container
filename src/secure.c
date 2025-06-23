@@ -124,7 +124,7 @@ int prepare_syscall_limitations() {
 
         // Allows contained processes to write to the controlling terminal
         seccomp_rule_add(ctx, SEC_SCMP_FAIL, SCMP_SYS(ioctl), 1,
-                        SCMP_A1(SCMP_CMP_MASKED_EQ, TIOCSTI, TIOCSTI)) ||
+                        SCMP_A1(SCMP_CMP_EQ, TIOCSTI)) ||
 
         // The kernel keyring system is not namespaced
         seccomp_rule_add(ctx, SEC_SCMP_FAIL, SCMP_SYS(keyctl), 0) ||
