@@ -35,14 +35,20 @@ int mount_dir_into_container(const char *mount_dir, char *tmp_dir){
         return -1;
     }
 
-    // drop the old root, preventing it from being used
-    char oldroot_base[128];
-    snprintf(oldroot_base, sizeof(oldroot_base), "/%s", basename(strdup(oldroot)));
-
     if (chdir("/") < 0) {
         log_error("Failed to change directory to new root: %m");
         return -1;
     }
+
+    mkdir("/proc", 0755);
+    if(mount("proc", "/proc", "proc", MS_NOSUID | MS_NOEXEC | MS_NODEV, NULL) < 0) {
+        log_error("Failed to mount /proc: %m");
+        return -1;
+    }
+
+    // drop the old root, preventing it from being used
+    char oldroot_base[128];
+    snprintf(oldroot_base, sizeof(oldroot_base), "/%s", basename(strdup(oldroot)));
 
     if (umount2(oldroot_base, MNT_DETACH) < 0) {
         log_error("Failed to unmount old root: %m");
