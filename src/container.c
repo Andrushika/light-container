@@ -4,6 +4,7 @@
 #include "userns.h"
 #include "secure.h"
 #include "mountns.h"
+#include "cgroups.h"
 
 #include <signal.h>
 #include <sched.h>
@@ -31,6 +32,8 @@ int container_start(void *arg) {
         log_error("Failed to set properties: %m");
         return -1;
     }
+    log_debug("User namespace initialized for container with UID %d", config->uid);
+
 
     log_debug("preparing capabilities...");
     if(prepare_capabilities() < 0) {

@@ -4,6 +4,7 @@
 #include "argtable3.h"
 #include "container.h"
 #include "userns.h"
+#include "cgroups.h"
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -97,6 +98,12 @@ int main(int argc, char *argv[]) {
         goto exit;
     }
 
+    log_debug("Setting up cgroups for container...");
+    if (setup_cgroups(config.hostname, container_pid) < 0) {
+        log_error("Failed to setup cgroups: %m");
+        return -1;
+    }
+
     if(container_wait(container_pid) < 0) {
         exit_code = -1;
         goto exit;
@@ -112,6 +119,7 @@ exit:
     rmdir(tmpdir);
     close(sockets[0]);
     close(sockets[1]);
+    cleanup_cgroups();
     log_debug("Exiting with code %d", exit_code);
     return exit_code;
 }

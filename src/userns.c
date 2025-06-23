@@ -73,6 +73,5 @@ int userns_init(int uid, int socket_fd) {
         return -1;
     }
 
-    log_debug("User namespace initialized for container with UID %d", uid);
     return 0;
 }
