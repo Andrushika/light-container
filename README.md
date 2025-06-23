@@ -38,7 +38,7 @@ Use for limiting the system call by seccomp.
     sudo apt-get install libseccomp-dev
     ```
 
-## Using Cgroups (optional)
+### Using Cgroups (optional)
 Light-container runs in rootless mode. However, configuring cgroups requires a bit of preliminary setup. You simply need to create a dedicated subdirectory in the cgroup2 filesystem for light-container. For example, you can run:
 
 ```
@@ -49,3 +49,7 @@ sudo chown -R $(id -u):$(id -u) /sys/fs/cgroup/light-container
 ```
 
 These steps are optional. Light-container will still function normally even if you don’t use cgroups.
+
+## License
+
+This project is licensed under the MIT License – see the [LICENSE](./LICENSE) file for details.
