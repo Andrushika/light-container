@@ -50,6 +50,9 @@ sudo chown -R $(id -u):$(id -u) /sys/fs/cgroup/light-container
 
 These steps are optional. Light-container will still function normally even if you don’t use cgroups.
 
+## Networking
+The networking is not included in light-container itself currently, but will be released in later versions. It's recommended to use [slirp4netns](https://github.com/rootless-containers/slirp4netns), which enables the container runtime to have networking functionality.
+
 ## License
 
 This project is licensed under the MIT License – see the [LICENSE](./LICENSE) file for details.
