@@ -1,7 +1,9 @@
 #ifndef CGROUPS_H
 #define CGROUPS_H
 
-int setup_cgroups(const char *container_name, int pid);
-void cleanup_cgroups();
+#include <sys/types.h>
+
+int setup_cgroups(pid_t container_pid);
+void cleanup_cgroups(void);
 
 #endif

@@ -99,7 +99,7 @@ int main(int argc, char *argv[]) {
     }
 
     log_debug("Setting up cgroups for container...");
-    if (setup_cgroups(config.hostname, container_pid) < 0) {
+    if (setup_cgroups(container_pid) < 0) {
         log_warn("Cgroups is not enabled; resource limits will be skipped");
     }
 
