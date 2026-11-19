@@ -2,6 +2,7 @@
 #include "userns.h"
 #include "log.h"
 
+#include <errno.h>
 #include <grp.h>
 #include <pwd.h>
 #include <stdio.h>
@@ -38,7 +39,8 @@ static int read_subid_range(const char *file, unsigned long id,
 
 // Map container root to the calling user, so the container can use files the
 // user owns (the rootfs), and IDs 1.. to the user's subordinate range.
-static int write_id_map(const char *helper, const char *subid_file,
+// /etc/subuid and /etc/subgid are both keyed by user name or UID.
+static int write_id_map(const char *helper, const char *subid_file, uid_t owner,
                         unsigned long own_id, pid_t container_pid) {
     char pid_s[16], own_s[16], start_s[24], count_s[24];
     snprintf(pid_s, sizeof(pid_s), "%d", container_pid);
@@ -46,7 +48,7 @@ static int write_id_map(const char *helper, const char *subid_file,
     const char *argv[] = {helper, pid_s, "0", own_s, "1", NULL, NULL, NULL, NULL};
 
     unsigned long start, count;
-    if (read_subid_range(subid_file, own_id, &start, &count) == 0) {
+    if (read_subid_range(subid_file, owner, &start, &count) == 0) {
         snprintf(start_s, sizeof(start_s), "%lu", start);
         snprintf(count_s, sizeof(count_s), "%lu",
                  count < USERNS_MAX_SUBIDS ? count : USERNS_MAX_SUBIDS);
@@ -81,8 +83,8 @@ static int write_id_map(const char *helper, const char *subid_file,
 }
 
 int write_id_maps(pid_t container_pid) {
-    if (write_id_map("newuidmap", "/etc/subuid", getuid(), container_pid) < 0 ||
-        write_id_map("newgidmap", "/etc/subgid", getgid(), container_pid) < 0) {
+    if (write_id_map("newuidmap", "/etc/subuid", getuid(), getuid(), container_pid) < 0 ||
+        write_id_map("newgidmap", "/etc/subgid", getuid(), getgid(), container_pid) < 0) {
         return -1;
     }
     log_debug("User namespace ID mapping written for PID %d", container_pid);
@@ -90,7 +92,9 @@ int write_id_maps(pid_t container_pid) {
 }
 
 int userns_init(uid_t uid) {
-    if (setgroups(1, &(gid_t){uid}) || setresgid(uid, uid, uid) ||
+    // newgidmap denies setgroups when it maps only the caller's own GID (no
+    // /etc/subgid entry); the container then keeps its single group.
+    if ((setgroups(1, &(gid_t){uid}) && errno != EPERM) || setresgid(uid, uid, uid) ||
         setresuid(uid, uid, uid)) {
         log_error("failed to set uid %d / gid %d: %m", uid, uid);
         return -1;

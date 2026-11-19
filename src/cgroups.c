@@ -93,11 +93,18 @@ int setup_cgroups(pid_t container_pid) {
     }
 
     for (size_t i = 0; i < sizeof(limits) / sizeof(*limits); i++) {
-        if (write_file(base, "cgroup.subtree_control", limits[i].enable) < 0) {
+        if (write_file(base, "cgroup.subtree_control", limits[i].enable) == 0) {
+            if (write_file(container_cgroup, limits[i].file, limits[i].value) < 0) {
+                log_warn("Failed to set %s: %m", limits[i].file);
+            }
+        } else if (errno == EBUSY) {
+            log_warn("Other processes share cgroup %s, so no limits are set. Start "
+                     "light-container in its own `systemd-run --user --scope -p "
+                     "Delegate=yes`", base);
+            break;
+        } else {
             log_warn("Controller %s is not available in %s, skipping %s: %m",
                      limits[i].enable + 1, base, limits[i].file);
-        } else if (write_file(container_cgroup, limits[i].file, limits[i].value) < 0) {
-            log_warn("Failed to set %s: %m", limits[i].file);
         }
     }
     log_debug("Container %d placed in cgroup %s", container_pid, container_cgroup);

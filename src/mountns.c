@@ -9,6 +9,7 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 // A rootless container cannot mknod, so these are bind-mounted from the host.
@@ -49,6 +50,9 @@ static int setup_dev(const char *root) {
     for (size_t i = 0; i < sizeof(host_devices) / sizeof(*host_devices); i++) {
         snprintf(path, sizeof(path), "%s/dev/%s", root, host_devices[i]);
         snprintf(host, sizeof(host), "/dev/%s", host_devices[i]);
+        if (access(host, F_OK) < 0) {
+            continue;
+        }
         int fd = open(path, O_CREAT | O_WRONLY | O_CLOEXEC, 0666);
         if (fd < 0) {
             log_error("Failed to create %s: %m", path);
@@ -69,18 +73,30 @@ static int setup_dev(const char *root) {
     return 0;
 }
 
-// Point DNS at slirp4netns's resolver. The file lands in the overlay's upper
-// layer, so the rootfs keeps its own copy.
-static int write_resolv_conf(const char *root) {
-    char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s/etc/resolv.conf", root);
-    unlink(path); // may be a symlink, e.g. to systemd-resolved's stub
-    FILE *f = fopen(path, "we");
-    if (!f || fputs("nameserver 10.0.2.3\n", f) < 0 || fclose(f) != 0) {
-        log_error("Failed to write %s: %m", path);
-        return -1;
+// Point DNS at slirp4netns's resolver. Runs after pivot_root, so symlinks in
+// the rootfs resolve inside it. The file lands in the overlay's upper layer,
+// so the rootfs keeps its own copy.
+static void write_resolv_conf(void) {
+    if (access("/etc", F_OK) < 0) {
+        return;
     }
-    return 0;
+    unlink("/etc/resolv.conf"); // may be a symlink, e.g. to systemd-resolved's stub
+    FILE *f = fopen("/etc/resolv.conf", "we");
+    if (!f || fputs("nameserver 10.0.2.3\n", f) < 0 || fclose(f) != 0) {
+        log_warn("Failed to write /etc/resolv.conf, DNS may not work: %m");
+    }
+}
+
+// overlayfs splits lowerdir on ':' and options on ','; escape them.
+static void escape_overlay_path(char *out, size_t size, const char *path) {
+    size_t n = 0;
+    for (; *path && n + 2 < size; path++) {
+        if (*path == ':' || *path == ',' || *path == '\\') {
+            out[n++] = '\\';
+        }
+        out[n++] = *path;
+    }
+    out[n] = '\0';
 }
 
 // Make an overlay with the rootfs as its read-only lower layer and a tmpfs
@@ -93,15 +109,21 @@ int mount_dir_into_container(const char *rootfs, const char *tmp_dir) {
         return -1;
     }
 
-    char upper[PATH_MAX], work[PATH_MAX], root[PATH_MAX], opts[3 * PATH_MAX];
+    char upper[PATH_MAX], work[PATH_MAX], root[PATH_MAX], lower[2 * PATH_MAX];
+    char opts[5 * PATH_MAX];
     snprintf(upper, sizeof(upper), "%s/upper", tmp_dir);
     snprintf(work, sizeof(work), "%s/work", tmp_dir);
     snprintf(root, sizeof(root), "%s/root", tmp_dir);
+    escape_overlay_path(lower, sizeof(lower), rootfs);
     snprintf(opts, sizeof(opts), "lowerdir=%s,upperdir=%s,workdir=%s,userxattr",
-             rootfs, upper, work);
+             lower, upper, work);
     if (mkdir(upper, 0755) < 0 || mkdir(work, 0755) < 0 || mkdir(root, 0755) < 0) {
         log_error("Failed to create overlay directories in %s: %m", tmp_dir);
         return -1;
+    }
+    if (setxattr(upper, "user.light-container", "", 0, 0) < 0) {
+        log_warn("tmpfs has no user xattrs (needs Linux 6.6): deleting or renaming a "
+                 "rootfs directory inside the container will fail with EIO");
     }
     if (mount_fs("overlay", root, "overlay", 0, opts) < 0) {
         return -1;
@@ -116,7 +138,7 @@ int mount_dir_into_container(const char *rootfs, const char *tmp_dir) {
             return -1;
         }
     }
-    if (setup_dev(root) < 0 || write_resolv_conf(root) < 0) {
+    if (setup_dev(root) < 0) {
         return -1;
     }
 
@@ -127,5 +149,6 @@ int mount_dir_into_container(const char *rootfs, const char *tmp_dir) {
         log_error("Failed to pivot into %s: %m", root);
         return -1;
     }
+    write_resolv_conf();
     return 0;
 }

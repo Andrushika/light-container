@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
+#include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -30,8 +31,12 @@ pid_t network_start(pid_t container_pid, int quiet) {
         snprintf(pid_s, sizeof(pid_s), "%d", container_pid);
         snprintf(fd_s, sizeof(fd_s), "%d", ready[1]);
         fcntl(ready[1], F_SETFD, 0);
+        // Its own session keeps Ctrl-C meant for the container from killing
+        // it; the death signal stops it if light-container dies.
+        setsid();
+        prctl(PR_SET_PDEATHSIG, SIGKILL);
         if (quiet) {
-            int devnull = open("/dev/null", O_WRONLY);
+            int devnull = open("/dev/null", O_WRONLY | O_CLOEXEC);
             dup2(devnull, STDOUT_FILENO);
             dup2(devnull, STDERR_FILENO);
         }

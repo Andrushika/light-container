@@ -7,12 +7,29 @@
 #include "userns.h"
 #include "cgroups.h"
 #include "network.h"
+#include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+static pid_t container_pid;
+
+static void forward_signal(int sig) {
+    kill(container_pid, sig);
+}
+
+// Stay alive until the container exits so cleanup runs. Ctrl-C and Ctrl-backslash
+// already reach the container through the terminal; SIGTERM and SIGHUP sent
+// to light-container are passed on to it.
+static void handle_signals(void) {
+    signal(SIGINT, SIG_IGN);
+    signal(SIGQUIT, SIG_IGN);
+    struct sigaction forward = {.sa_handler = forward_signal, .sa_flags = SA_RESTART};
+    sigaction(SIGTERM, &forward, NULL);
+    sigaction(SIGHUP, &forward, NULL);
+}
+
 int main(int argc, char *argv[]) {
     int exit_code = 0;
-    int container_pid = 0;
     pid_t net_pid = -1;
     container_config config;
     int sockets[2] = {-1, -1};
@@ -76,6 +93,7 @@ int main(int argc, char *argv[]) {
     
     config.hostname = "light-container";
     config.socket_fd = sockets[1];
+    config.parent_socket_fd = sockets[0];
     config.uid = uid_opt->ival[0];
     config.mount_dir = mount_opt->sval[0];
     config.argv = (char **)cmd_opt->sval;
@@ -93,7 +111,8 @@ int main(int argc, char *argv[]) {
         exit_code = -1;
         goto exit;
     }
-    
+    handle_signals();
+
     // The container waits on the socket until its ID maps, cgroup and network
     // exist, so nothing in it runs unconfined.
     int ready = write_id_maps(container_pid) == 0;

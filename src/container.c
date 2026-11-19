@@ -11,7 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <errno.h>
 #include <net/if.h>
+#include <sys/prctl.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -34,6 +36,10 @@ static int bring_up_loopback(void) {
 
 int container_start(void *arg) {
     container_config *config = (container_config *)arg;
+
+    // Die with light-container, and see EOF if it dies before releasing us.
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    close(config->parent_socket_fd);
 
     int ready = 0;
     if (read(config->socket_fd, &ready, sizeof(ready)) != sizeof(ready) || !ready) {
@@ -86,7 +92,7 @@ int container_start(void *arg) {
     if(config->argv && config->argv[0]) {
         execvp(config->argv[0], config->argv);
         log_error("Failed to execvp command '%s': %m", config->argv[0]);
-        return -1;
+        return errno == ENOENT ? 127 : 126; // the shell's convention
     }
     log_error("No command provided to execute in the container");
     return -1;
@@ -118,7 +124,10 @@ int container_release(int socket_fd, int ready) {
 
 int container_wait(pid_t container_pid) {
     int status;
-    if (waitpid(container_pid, &status, 0) == -1) {
+    pid_t ret;
+    while ((ret = waitpid(container_pid, &status, 0)) == -1 && errno == EINTR) {
+    }
+    if (ret == -1) {
         log_error("waitpid failed: %m");
         return -1;
     }

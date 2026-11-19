@@ -10,6 +10,7 @@ typedef struct {
   char **argv;
   const char *mount_dir;
   int socket_fd;
+  int parent_socket_fd; // the parent's end, closed in the child
   char *mount_tmp_dir;
 } container_config;
 
