@@ -21,6 +21,11 @@
  */
 
 #include "log.h"
+#include <errno.h>
+
+// errno at the log_* call, restored before formatting so %m reports the
+// caller's error rather than one from localtime() or the prefix writes.
+static int caller_errno;
 
 #define MAX_CALLBACKS 32
 
@@ -63,6 +68,7 @@ static void stdout_callback(log_Event *ev) {
     ev->udata, "%s %-5s %s:%d: ",
     buf, level_strings[ev->level], ev->file, ev->line);
 #endif
+  errno = caller_errno;
   vfprintf(ev->udata, ev->fmt, ev->ap);
   fprintf(ev->udata, "\n");
   fflush(ev->udata);
@@ -75,6 +81,7 @@ static void file_callback(log_Event *ev) {
   fprintf(
     ev->udata, "%s %-5s %s:%d: ",
     buf, level_strings[ev->level], ev->file, ev->line);
+  errno = caller_errno;
   vfprintf(ev->udata, ev->fmt, ev->ap);
   fprintf(ev->udata, "\n");
   fflush(ev->udata);
@@ -138,6 +145,7 @@ static void init_event(log_Event *ev, void *udata) {
 
 
 void log_log(int level, const char *file, int line, const char *fmt, ...) {
+  int saved_errno = errno;
   log_Event ev = {
     .fmt   = fmt,
     .file  = file,
@@ -146,6 +154,7 @@ void log_log(int level, const char *file, int line, const char *fmt, ...) {
   };
 
   lock();
+  caller_errno = saved_errno;
 
   if (!L.quiet && level >= L.level) {
     init_event(&ev, stderr);
@@ -165,4 +174,5 @@ void log_log(int level, const char *file, int line, const char *fmt, ...) {
   }
 
   unlock();
+  errno = saved_errno;
 }
