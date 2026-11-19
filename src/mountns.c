@@ -1,63 +1,117 @@
 #define _GNU_SOURCE
+#include "mountns.h"
 #include "log.h"
-#include <sys/mount.h>
-#include <unistd.h>
-#include <sys/stat.h>
+
+#include <errno.h>
 #include <fcntl.h>
-#include <string.h>
-#include <libgen.h> 
+#include <limits.h>
+#include <stdio.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
-int mount_dir_into_container(const char *mount_dir, char *tmp_dir){
+// A rootless container cannot mknod, so these are bind-mounted from the host.
+static const char *const host_devices[] = {"null", "zero", "full", "random", "urandom", "tty"};
 
-    // MS_REC: recursively apply the mount flags to all submounts
-    // MS_PRIVATE: make the mount private, so it won't propagate to other mount namespaces
-    if (mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL)) {
-        log_error("failed to mount /: %m");
+static const struct {
+    const char *target;
+    const char *path;
+} dev_links[] = {
+    {"/proc/self/fd", "fd"},       {"/proc/self/fd/0", "stdin"},
+    {"/proc/self/fd/1", "stdout"}, {"/proc/self/fd/2", "stderr"},
+    {"pts/ptmx", "ptmx"},
+};
+
+static const struct {
+    const char *path;
+    const char *fstype;
+    unsigned long flags;
+    const char *data;
+} fs_mounts[] = {
+    {"/proc", "proc", MS_NOSUID | MS_NOEXEC | MS_NODEV, NULL},
+    {"/dev", "tmpfs", MS_NOSUID | MS_STRICTATIME, "mode=755"},
+    {"/dev/pts", "devpts", MS_NOSUID | MS_NOEXEC, "newinstance,ptmxmode=0666,mode=0620"},
+    {"/dev/shm", "tmpfs", MS_NOSUID | MS_NODEV | MS_NOEXEC, "mode=1777"},
+};
+
+static int mount_fs(const char *src, const char *dst, const char *fstype,
+                    unsigned long flags, const char *data) {
+    if (mount(src, dst, fstype, flags, data) < 0) {
+        log_error("Failed to mount %s on %s: %m", fstype ? fstype : src, dst);
         return -1;
     }
-    
-    // bind new root
-    if (mount(mount_dir, tmp_dir, NULL, MS_BIND | MS_PRIVATE, NULL)){
-        log_error("Failed to bind mount %s to %s: %m", mount_dir, tmp_dir);
+    return 0;
+}
+
+static int setup_dev(const char *root) {
+    char path[PATH_MAX], host[PATH_MAX];
+    for (size_t i = 0; i < sizeof(host_devices) / sizeof(*host_devices); i++) {
+        snprintf(path, sizeof(path), "%s/dev/%s", root, host_devices[i]);
+        snprintf(host, sizeof(host), "/dev/%s", host_devices[i]);
+        int fd = open(path, O_CREAT | O_WRONLY | O_CLOEXEC, 0666);
+        if (fd < 0) {
+            log_error("Failed to create %s: %m", path);
+            return -1;
+        }
+        close(fd);
+        if (mount_fs(host, path, NULL, MS_BIND, NULL) < 0) {
+            return -1;
+        }
+    }
+    for (size_t i = 0; i < sizeof(dev_links) / sizeof(*dev_links); i++) {
+        snprintf(path, sizeof(path), "%s/dev/%s", root, dev_links[i].path);
+        if (symlink(dev_links[i].target, path) < 0) {
+            log_error("Failed to create %s: %m", path);
+            return -1;
+        }
+    }
+    return 0;
+}
+
+// Make an overlay with the rootfs as its read-only lower layer and a tmpfs
+// upper layer, so the host rootfs is never modified and needs no write
+// permission. Then pivot into it.
+int mount_dir_into_container(const char *rootfs, const char *tmp_dir) {
+    // MS_PRIVATE: keep every mount below from propagating to the host
+    if (mount_fs(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL) < 0 ||
+        mount_fs("tmpfs", tmp_dir, "tmpfs", 0, "mode=755") < 0) {
         return -1;
     }
 
-    char oldroot[128];
-    snprintf(oldroot, sizeof(oldroot), "%s/oldroot.XXXXXX", tmp_dir);
-    if (!mkdtemp(oldroot)){
-        log_error("Failed to create temporary directory for old root: %m");
+    char upper[PATH_MAX], work[PATH_MAX], root[PATH_MAX], opts[3 * PATH_MAX];
+    snprintf(upper, sizeof(upper), "%s/upper", tmp_dir);
+    snprintf(work, sizeof(work), "%s/work", tmp_dir);
+    snprintf(root, sizeof(root), "%s/root", tmp_dir);
+    snprintf(opts, sizeof(opts), "lowerdir=%s,upperdir=%s,workdir=%s,userxattr",
+             rootfs, upper, work);
+    if (mkdir(upper, 0755) < 0 || mkdir(work, 0755) < 0 || mkdir(root, 0755) < 0) {
+        log_error("Failed to create overlay directories in %s: %m", tmp_dir);
+        return -1;
+    }
+    if (mount_fs("overlay", root, "overlay", 0, opts) < 0) {
         return -1;
     }
 
-    // // pivot root to the new root
-    if (pivot_root(tmp_dir, oldroot)){
-        log_error("Failed to pivot root: %m");
+    char path[PATH_MAX];
+    for (size_t i = 0; i < sizeof(fs_mounts) / sizeof(*fs_mounts); i++) {
+        snprintf(path, sizeof(path), "%s%s", root, fs_mounts[i].path);
+        if ((mkdir(path, 0755) < 0 && errno != EEXIST) ||
+            mount_fs(fs_mounts[i].fstype, path, fs_mounts[i].fstype,
+                     fs_mounts[i].flags, fs_mounts[i].data) < 0) {
+            return -1;
+        }
+    }
+    if (setup_dev(root) < 0) {
         return -1;
     }
 
-    if (chdir("/") < 0) {
-        log_error("Failed to change directory to new root: %m");
+    // pivot_root(".", ".") stacks the old root on top of the new one; detaching
+    // it leaves only the container's root visible.
+    if (chdir(root) < 0 || syscall(SYS_pivot_root, ".", ".") < 0 ||
+        umount2(".", MNT_DETACH) < 0 || chdir("/") < 0) {
+        log_error("Failed to pivot into %s: %m", root);
         return -1;
     }
-
-    mkdir("/proc", 0755);
-    if(mount("proc", "/proc", "proc", MS_NOSUID | MS_NOEXEC | MS_NODEV, NULL) < 0) {
-        log_error("Failed to mount /proc: %m");
-        return -1;
-    }
-
-    // drop the old root, preventing it from being used
-    char oldroot_base[128];
-    snprintf(oldroot_base, sizeof(oldroot_base), "/%s", basename(strdup(oldroot)));
-
-    if (umount2(oldroot_base, MNT_DETACH) < 0) {
-        log_error("Failed to unmount old root: %m");
-        return -1;
-    }
-    if (rmdir(oldroot_base) < 0) {
-        log_error("Failed to remove old root directory: %m");
-        return -1;
-    }
-    
     return 0;
 }
