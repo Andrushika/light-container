@@ -81,5 +81,48 @@ out=$(lc -u 0 -m "$ROOTFS" -- /bin/sh -c 'wget -q -T 10 -O /dev/null http://dl-c
 out=$(lc -u 0 -m "$ROOTFS" -- /bin/sh -c '/sbin/ip -o link show lo | grep -q UP && echo up')
 [ "$out" = up ] && pass "loopback is up" || fail "loopback (got '$out')"
 
+# --- rootfs and account variants -----------------------------------------
+odd="/home/dev/alpine:3,20"; cp -a $ROOTFS "$odd"
+out=$(lc -u 0 -m "$odd" -- /bin/echo ok)
+[ "$out" = ok ] && pass "rootfs path with ':' and ','" || { fail "odd rootfs path (got '$out')"; cat /tmp/lc.err; }
+
+noetc=/home/dev/rootfs-noetc; cp -a $ROOTFS $noetc; rm -rf $noetc/etc
+out=$(lc -u 0 -m $noetc -- /bin/echo ok)
+[ "$out" = ok ] && pass "rootfs without /etc" || { fail "rootfs without /etc (got '$out')"; cat /tmp/lc.err; }
+
+link=/home/dev/rootfs-link; cp -a $ROOTFS $link; rm -rf $link/etc
+mkdir /home/dev/victim; echo original > /home/dev/victim/resolv.conf; chown -R dev:dev /home/dev/victim
+ln -s /home/dev/victim $link/etc; chown -h dev:dev $link/etc
+lc -u 0 -m $link -- /bin/true
+[ "$(cat /home/dev/victim/resolv.conf)" = original ] && pass "absolute /etc symlink in rootfs cannot touch host files" || fail "host file overwritten through rootfs symlink"
+
+cp -a $ROOTFS /opt/rootfs; chown -R root:root /opt/rootfs
+install -m 755 "$BIN" /usr/local/bin/light-container # /home/dev is 0700
+useradd -M nosubgid; sed -i '/^nosubgid:/d' /etc/subgid
+useradd -M -g users numeric; sed -i "s/^numeric:/$(id -u numeric):/" /etc/subgid
+for u in nosubgid numeric; do
+    out=$(setpriv --reuid=$u --regid=$(id -g $u) --init-groups env -i PATH=/usr/bin:/bin /usr/local/bin/light-container -u 0 -m /opt/rootfs -- /bin/echo ok 2>/tmp/lc.err)
+    [ "$out" = ok ] && pass "runs for a user with $u /etc/subgid entry" || { fail "user $u (got '$out')"; cat /tmp/lc.err; }
+done
+
+lc -u 0 -m "$ROOTFS" -- /no/such/cmd; rc=$?
+[ $rc = 127 ] && pass "missing command exits 127" || fail "missing command (got $rc)"
+
+# --- signals ----------------------------------------------------------------
+leftovers() { # processes or cgroups a run left behind in cgroup $1
+    for p in /proc/[0-9]*; do case $(cat $p/comm 2>/dev/null) in sleep|slirp4netns) echo -n "$(cat $p/comm) ";; esac; done
+    ls -d "$1"/light-container-* 2>/dev/null
+}
+start_bg() { d=$(delegated_cgroup); setsid sh -c 'echo $$ > "$0/cgroup.procs" && exec setpriv --reuid=dev --regid=dev --init-groups env -i --default-signal=INT HOME=/home/dev PATH=/usr/bin:/bin "$1" -u 0 -m "$2" -- /bin/sleep 2' "$d" "$BIN" "$ROOTFS" 2>/dev/null & sleep 1; rt=$(pidof light-container); }
+
+start_bg; kill -INT -- -"$rt"; sleep 2.5
+l=$(leftovers "$d"); [ -z "$l" ] && pass "Ctrl-C (SIGINT to the process group) leaks nothing" || fail "Ctrl-C left: $l"
+
+start_bg; kill -TERM "$rt"; sleep 2.5
+l=$(leftovers "$d"); [ -z "$l" ] && pass "SIGTERM to the runtime leaks nothing" || fail "SIGTERM left: $l"
+
+start_bg; kill -KILL "$rt"; sleep 0.5
+l=$(leftovers /nonexistent); [ -z "$l" ] && pass "SIGKILL to the runtime takes the container and slirp4netns down" || fail "SIGKILL left: $l"
+
 echo "---- $fails failure(s)"
 exit $fails
