@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <sys/socket.h>
 #include "log.h"
@@ -5,7 +6,6 @@
 #include "container.h"
 #include "userns.h"
 #include "cgroups.h"
-#include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -13,11 +13,13 @@ int main(int argc, char *argv[]) {
     int exit_code = 0;
     int container_pid = 0;
     container_config config;
-    int sockets[2] = {0};
+    int sockets[2] = {-1, -1};
+    char tmpdir[] = "/tmp/light-container-mnt.XXXXXX";
 
     char *stack = NULL;
 
     struct arg_lit *help = arg_lit0(NULL, "help", "display this help and exit");
+    struct arg_lit *verbose = arg_lit0("v", "verbose", "print debug logs");
     struct arg_int *uid_opt = arg_int1("u", "uid", "<uid>", "set the user ID in the container");
     struct arg_str *mount_opt = arg_str1("m", "mount", "<dir>", "set the mount directory");
     struct arg_str *cmd_opt = arg_strn(NULL, NULL, "<cmd>...", 1, 10000, "command and its arguments");
@@ -25,6 +27,7 @@ int main(int argc, char *argv[]) {
 
     void *argtable[] = {
         help,
+        verbose,
         uid_opt,
         cmd_opt,
         mount_opt,
@@ -38,6 +41,8 @@ int main(int argc, char *argv[]) {
         arg_print_glossary(stdout, argtable, "  %-25s %s\n");
         goto exit;
     }
+
+    log_set_level(verbose->count > 0 ? LOG_DEBUG : LOG_WARN);
 
     if(nerrors != 0) {
         arg_print_errors(stdout, end, argv[0]);
@@ -55,29 +60,23 @@ int main(int argc, char *argv[]) {
     cmd_opt->sval[cmd_opt->count] = NULL;
 
 
-    if (socketpair(AF_LOCAL, SOCK_SEQPACKET, 0, sockets)) {
+    if (socketpair(AF_LOCAL, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sockets)) {
         log_error("Failed to create socket pair: %m");
         exit_code = -1;
         goto exit;
     }
 
-    if(fcntl(sockets[0], F_SETFD, FD_CLOEXEC) < 0) {
-        log_error("Failed to set close-on-exec flag on socket: %m");
-        exit_code = -1;
-        goto exit;
-    }
-
-    char tmpdir[] = "/tmp/light-container-mnt.XXXXXX";
     if (!mkdtemp(tmpdir)){
         log_error("Failed to create temporary directory for mount: %m");
-        return -1;
+        exit_code = -1;
+        goto exit;
     }
     
     config.hostname = "light-container";
     config.socket_fd = sockets[1];
     config.uid = uid_opt->ival[0];
     config.mount_dir = mount_opt->sval[0];
-    config.argv = cmd_opt->sval;
+    config.argv = (char **)cmd_opt->sval;
     config.mount_tmp_dir = tmpdir;
 
     stack = malloc(CONTAINER_STACK_SIZE);
@@ -93,23 +92,19 @@ int main(int argc, char *argv[]) {
         goto exit;
     }
     
-    if(write_id_map_with_helper(container_pid, sockets[0]) < 0) {
+    // The container waits on the socket until its ID maps and cgroup exist,
+    // so nothing in it runs unconfined.
+    int ready = write_id_maps(container_pid) == 0;
+    if (ready) {
+        setup_cgroups(container_pid);
+    }
+    if (container_release(sockets[0], ready) < 0 || !ready) {
+        container_wait(container_pid);
         exit_code = -1;
         goto exit;
     }
 
-    log_debug("Setting up cgroups for container...");
-    if (setup_cgroups(container_pid) < 0) {
-        log_warn("Cgroups is not enabled; resource limits will be skipped");
-    }
-
-    log_debug("Container initialized with PID %d", container_pid);
-
-    if(container_wait(container_pid) < 0) {
-        exit_code = -1;
-        goto exit;
-    }
-    
+    exit_code = container_wait(container_pid);
 
 exit:
     arg_freetable(argtable, sizeof(argtable)/sizeof(argtable[0]));

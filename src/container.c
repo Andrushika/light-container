@@ -11,9 +11,24 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 int container_start(void *arg) {
     container_config *config = (container_config *)arg;
+
+    int ready = 0;
+    if (read(config->socket_fd, &ready, sizeof(ready)) != sizeof(ready) || !ready) {
+        log_error("Host side setup failed, exiting");
+        return -1;
+    }
+
+    // Unshare only now that the parent has moved us into the container's
+    // cgroup, so the namespace is rooted there.
+    if (unshare(CLONE_NEWCGROUP) < 0) {
+        log_error("Failed to create cgroup namespace: %m");
+        return -1;
+    }
 
     log_debug("Setting hostname to %s", config->hostname);
     if (sethostname(config->hostname, strlen(config->hostname)) < 0) {
@@ -23,17 +38,9 @@ int container_start(void *arg) {
 
     log_debug("Mounting directory '%s' into container...", config->mount_dir);
     if (mount_dir_into_container(config->mount_dir, config->mount_tmp_dir) < 0) {
-        log_error("Failed to mount directory into container: %m");
+        log_error("Failed to mount directory into container");
         return -1;
     }
-
-    log_debug("Setting UID to %d", config->uid);
-    if (userns_init(config->uid, config->socket_fd) < 0) {
-        log_error("Failed to set properties: %m");
-        return -1;
-    }
-    log_debug("User namespace initialized for container with UID %d", config->uid);
-
 
     log_debug("preparing capabilities...");
     if(prepare_capabilities() < 0) {
@@ -44,6 +51,13 @@ int container_start(void *arg) {
     log_debug("preparing syscall limitations...");
     if(prepare_syscall_limitations() < 0) {
         log_error("Failed to prepare syscall limitations: %m");
+        return -1;
+    }
+
+    // Last, because dropping root clears the capabilities the two steps above
+    // need (CAP_SETPCAP for the bounding set, CAP_SYS_ADMIN for seccomp).
+    log_debug("Setting UID to %d", config->uid);
+    if (userns_init(config->uid) < 0) {
         return -1;
     }
 
@@ -59,7 +73,7 @@ int container_start(void *arg) {
 int container_init(container_config *config, char *stack) {
     int container_pid = 0;
 
-    int flags = CLONE_NEWNS | CLONE_NEWCGROUP | CLONE_NEWPID | CLONE_NEWIPC |
+    int flags = CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWIPC |
                 CLONE_NEWNET | CLONE_NEWUTS | CLONE_NEWUSER | SIGCHLD;
 
     log_debug("cloning process...");
@@ -72,16 +86,24 @@ int container_init(container_config *config, char *stack) {
     return container_pid;
 }
 
-int container_wait(int container_pid) {
+int container_release(int socket_fd, int ready) {
+    if (send(socket_fd, &ready, sizeof(ready), MSG_NOSIGNAL) != sizeof(ready)) {
+        log_error("Failed to write to socket: %m");
+        return -1;
+    }
+    return 0;
+}
+
+int container_wait(pid_t container_pid) {
     int status;
     if (waitpid(container_pid, &status, 0) == -1) {
         log_error("waitpid failed: %m");
         return -1;
     }
-    if (WIFEXITED(status)) {
-        log_info("Container exited with status %d", WEXITSTATUS(status));
-    } else {
-        log_error("Container did not exit cleanly");
+    if (WIFSIGNALED(status)) {
+        log_info("Container killed by signal %d", WTERMSIG(status));
+        return 128 + WTERMSIG(status);
     }
-    return 0;
+    log_info("Container exited with status %d", WEXITSTATUS(status));
+    return WEXITSTATUS(status);
 }

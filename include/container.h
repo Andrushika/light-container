@@ -7,13 +7,18 @@
 typedef struct {
   uid_t uid;
   char *hostname;
-  char **argv; 
-  char *mount_dir;
+  char **argv;
+  const char *mount_dir;
   int socket_fd;
   char *mount_tmp_dir;
 } container_config;
 
 int container_init(container_config *config, char *stack);
 
-int container_wait(int container_pid);
+// Tell the cloned process whether the host side (ID maps, cgroup) is
+// ready, so it may continue or must exit.
+int container_release(int socket_fd, int ready);
+
+// Returns the container's exit status (128 + signal if it was killed), or -1.
+int container_wait(pid_t container_pid);
 #endif
