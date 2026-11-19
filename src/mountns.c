@@ -69,6 +69,20 @@ static int setup_dev(const char *root) {
     return 0;
 }
 
+// Point DNS at slirp4netns's resolver. The file lands in the overlay's upper
+// layer, so the rootfs keeps its own copy.
+static int write_resolv_conf(const char *root) {
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/etc/resolv.conf", root);
+    unlink(path); // may be a symlink, e.g. to systemd-resolved's stub
+    FILE *f = fopen(path, "we");
+    if (!f || fputs("nameserver 10.0.2.3\n", f) < 0 || fclose(f) != 0) {
+        log_error("Failed to write %s: %m", path);
+        return -1;
+    }
+    return 0;
+}
+
 // Make an overlay with the rootfs as its read-only lower layer and a tmpfs
 // upper layer, so the host rootfs is never modified and needs no write
 // permission. Then pivot into it.
@@ -102,7 +116,7 @@ int mount_dir_into_container(const char *rootfs, const char *tmp_dir) {
             return -1;
         }
     }
-    if (setup_dev(root) < 0) {
+    if (setup_dev(root) < 0 || write_resolv_conf(root) < 0) {
         return -1;
     }
 

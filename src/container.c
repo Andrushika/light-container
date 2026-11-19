@@ -11,8 +11,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+// A new network namespace starts with lo down; slirp4netns only sets up tap0.
+static int bring_up_loopback(void) {
+    struct ifreq ifr = {.ifr_name = "lo"};
+    int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (fd < 0 || ioctl(fd, SIOCGIFFLAGS, &ifr) < 0 ||
+        (ifr.ifr_flags |= IFF_UP, ioctl(fd, SIOCSIFFLAGS, &ifr) < 0)) {
+        log_error("Failed to bring up lo: %m");
+        if (fd >= 0) {
+            close(fd);
+        }
+        return -1;
+    }
+    close(fd);
+    return 0;
+}
 
 int container_start(void *arg) {
     container_config *config = (container_config *)arg;
@@ -33,6 +51,10 @@ int container_start(void *arg) {
     log_debug("Setting hostname to %s", config->hostname);
     if (sethostname(config->hostname, strlen(config->hostname)) < 0) {
         log_error("Failed to set hostname: %m");
+        return -1;
+    }
+
+    if (bring_up_loopback() < 0) {
         return -1;
     }
 

@@ -6,12 +6,14 @@
 #include "container.h"
 #include "userns.h"
 #include "cgroups.h"
+#include "network.h"
 #include <stdlib.h>
 #include <unistd.h>
 
 int main(int argc, char *argv[]) {
     int exit_code = 0;
     int container_pid = 0;
+    pid_t net_pid = -1;
     container_config config;
     int sockets[2] = {-1, -1};
     char tmpdir[] = "/tmp/light-container-mnt.XXXXXX";
@@ -92,11 +94,12 @@ int main(int argc, char *argv[]) {
         goto exit;
     }
     
-    // The container waits on the socket until its ID maps and cgroup exist,
-    // so nothing in it runs unconfined.
+    // The container waits on the socket until its ID maps, cgroup and network
+    // exist, so nothing in it runs unconfined.
     int ready = write_id_maps(container_pid) == 0;
     if (ready) {
         setup_cgroups(container_pid);
+        net_pid = network_start(container_pid, verbose->count == 0);
     }
     if (container_release(sockets[0], ready) < 0 || !ready) {
         container_wait(container_pid);
@@ -111,6 +114,7 @@ exit:
     if (stack) {
         free(stack);
     }
+    network_stop(net_pid);
     rmdir(tmpdir);
     close(sockets[0]);
     close(sockets[1]);

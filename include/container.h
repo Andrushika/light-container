@@ -15,7 +15,7 @@ typedef struct {
 
 int container_init(container_config *config, char *stack);
 
-// Tell the cloned process whether the host side (ID maps, cgroup) is
+// Tell the cloned process whether the host side (ID maps, cgroup, network) is
 // ready, so it may continue or must exit.
 int container_release(int socket_fd, int ready);
 
